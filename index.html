@@ -6,20 +6,40 @@
     <title>IoT Control Center</title>
     <style>
         body { font-family: sans-serif; background-color: #f4f4f4; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; margin: 0; transition: background-color 0.5s; }
-        .container { background-color: white; padding: 2rem; border-radius: 8px; box-shadow: 0 4px 8px rgba(0,0,0,0.1); text-align: center; width: 320px; }
+        
+        .container { 
+            background-color: white; 
+            padding: 2rem; 
+            border-radius: 8px; 
+            box-shadow: 0 4px 8px rgba(0,0,0,0.1); 
+            text-align: center; 
+            width: 320px; 
+            /* Ensure text stays black even in SOS mode */
+            color: #333 !important; 
+        }
+
         input[type="text"], select { width: 90%; padding: 10px; margin-bottom: 1rem; border: 1px solid #ccc; border-radius: 4px; font-size: 16px; }
-        button { background-color: #007bff; color: white; padding: 12px; border: none; border-radius: 4px; cursor: pointer; font-size: 1rem; width: 100%; margin-bottom: 10px; }
-        button:hover { background-color: #0056b3; }
+        
+        .btn { background-color: #007bff; color: white; padding: 12px; border: none; border-radius: 4px; cursor: pointer; font-size: 1rem; width: 100%; margin-bottom: 10px; }
+        .btn:hover { background-color: #0056b3; }
+        
+        #ackBtn { background-color: #28a745; display: none; margin-top: 10px; font-weight: bold; animation: pulse 1s infinite; }
+        
         #status, #deviceStatus { margin-top: 1rem; font-weight: bold; min-height: 20px; }
         
-        /* SOS Animation Classes */
+        /* SOS Animation Logic */
         .sos-mode { animation: redFlash 1s infinite; }
+        
+        /* The container stays white, but shakes */
+        .sos-container { animation: shake 0.5s infinite; border: 5px solid red; }
+
         @keyframes redFlash {
             0% { background-color: #ff0000; }
-            50% { background-color: #550000; }
+            50% { background-color: #330000; }
             100% { background-color: #ff0000; }
         }
-        .sos-text { color: white !important; font-size: 2rem; font-weight: bold; }
+        @keyframes pulse { 0% { transform: scale(1); } 50% { transform: scale(1.05); } 100% { transform: scale(1); } }
+        @keyframes shake { 0% { transform: translate(1px, 1px); } 25% { transform: translate(-1px, -2px); } 50% { transform: translate(-3px, 0px); } 75% { transform: translate(3px, 2px); } 100% { transform: translate(1px, -1px); } }
     </style>
 </head>
 <body>
@@ -36,14 +56,16 @@
             <option value="3">High (Red Alarm)</option>
         </select>
 
-        <button onclick="sendMessage()">Send Message</button>
+        <button class="btn" onclick="sendMessage()">Send Message</button>
+        
+        <!-- Special SOS Acknowledge Button -->
+        <button id="ackBtn" class="btn" onclick="acknowledgeSOS()">STOP ALARM & REPLY</button>
         
         <div id="status"></div>
         <hr>
-        <div>Device says: <span id="deviceStatus">Waiting...</span></div>
+        <div>Device Status: <span id="deviceStatus">Waiting...</span></div>
     </div>
 
-    <!-- SOS Audio -->
     <audio id="alarmSound" loop>
         <source src="https://actions.google.com/sounds/v1/alarms/alarm_clock.ogg" type="audio/ogg">
     </audio>
@@ -63,13 +85,27 @@
 
             if (!msg) { statusEl.innerText = "Enter a message!"; return; }
             statusEl.innerText = "Sending...";
+            
+            // RESET Device Status so user knows when the NEW Ack comes
+            document.getElementById('deviceStatus').innerText = "Waiting for device...";
+            document.getElementById('deviceStatus').style.color = "gray";
 
-            // Send Msg, Prio, ID. Also reset Field 4 (Status) to "Sent"
             const url = `https://api.thingspeak.com/update?api_key=${writeApiKey}&field1=${encodeURIComponent(msg)}&field2=${prio}&field3=${id}&field4=Sent`;
 
             fetch(url, { method: 'POST' }).then(r => r.text()).then(d => {
                 statusEl.innerText = (d !== "0") ? "Sent Successfully!" : "Error.";
             });
+        }
+
+        function acknowledgeSOS() {
+            // 1. Send message to LCD saying "HELP IS COMING"
+            // 2. Reset SOS status
+            const id = Math.floor(Math.random() * 10000) + 1;
+            const url = `https://api.thingspeak.com/update?api_key=${writeApiKey}&field1=HELP%20IS%20COMING&field2=3&field3=${id}&field4=SOS_ACK`;
+            
+            fetch(url, { method: 'POST' });
+            stopSOS();
+            document.getElementById('status').innerText = "Reply Sent to LCD";
         }
 
         // Poll for ACK or SOS every 5 seconds
@@ -78,31 +114,44 @@
                 .then(r => r.text())
                 .then(status => {
                     const disp = document.getElementById('deviceStatus');
-                    
-                    if (status.trim() === "ACK") {
+                    const cleanStatus = status.trim();
+
+                    if (cleanStatus === "ACK") {
                         disp.innerText = "✅ Message Acknowledged!";
                         disp.style.color = "green";
                         stopSOS();
-                    } else if (status.trim() === "SOS") {
-                        disp.innerText = "🚨 HELP! SOS RECEIVED! 🚨";
+                    } else if (cleanStatus === "SOS") {
+                        disp.innerText = "🚨 SOS RECEIVED! 🚨";
+                        disp.style.color = "red";
                         triggerSOS();
+                    } else if (cleanStatus === "SOS_ACK") {
+                         disp.innerText = "Responded to SOS";
+                         stopSOS();
                     } else {
-                        disp.innerText = status;
-                        disp.style.color = "black";
-                        stopSOS();
+                        // Keep showing whatever status (like "Sent")
+                        if(disp.innerText === "Waiting for device...") {
+                            // Don't overwrite if we are waiting
+                        } else if (cleanStatus === "Sent") {
+                            // Do nothing
+                        } else {
+                            disp.innerText = cleanStatus;
+                        }
                     }
                 });
         }, 5000);
 
         function triggerSOS() {
             document.body.classList.add('sos-mode');
-            document.getElementById('mainBox').classList.add('sos-text');
-            document.getElementById('alarmSound').play().catch(e => console.log("Click page to allow audio"));
+            document.getElementById('mainBox').classList.add('sos-container');
+            document.getElementById('ackBtn').style.display = "block"; // Show button
+            document.getElementById('alarmSound').play().catch(e => console.log("Audio requires interaction"));
         }
         function stopSOS() {
             document.body.classList.remove('sos-mode');
-            document.getElementById('mainBox').classList.remove('sos-text');
+            document.getElementById('mainBox').classList.remove('sos-container');
+            document.getElementById('ackBtn').style.display = "none"; // Hide button
             document.getElementById('alarmSound').pause();
+            document.getElementById('alarmSound').currentTime = 0;
         }
     </script>
 </body>

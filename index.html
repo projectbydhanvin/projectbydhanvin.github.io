@@ -14,7 +14,6 @@
             box-shadow: 0 4px 8px rgba(0,0,0,0.1); 
             text-align: center; 
             width: 320px; 
-            /* Ensure text stays black even in SOS mode */
             color: #333 !important; 
         }
 
@@ -27,17 +26,10 @@
         
         #status, #deviceStatus { margin-top: 1rem; font-weight: bold; min-height: 20px; }
         
-        /* SOS Animation Logic */
         .sos-mode { animation: redFlash 1s infinite; }
-        
-        /* The container stays white, but shakes */
         .sos-container { animation: shake 0.5s infinite; border: 5px solid red; }
 
-        @keyframes redFlash {
-            0% { background-color: #ff0000; }
-            50% { background-color: #330000; }
-            100% { background-color: #ff0000; }
-        }
+        @keyframes redFlash { 0% { background-color: #ff0000; } 50% { background-color: #330000; } 100% { background-color: #ff0000; } }
         @keyframes pulse { 0% { transform: scale(1); } 50% { transform: scale(1.05); } 100% { transform: scale(1); } }
         @keyframes shake { 0% { transform: translate(1px, 1px); } 25% { transform: translate(-1px, -2px); } 50% { transform: translate(-3px, 0px); } 75% { transform: translate(3px, 2px); } 100% { transform: translate(1px, -1px); } }
     </style>
@@ -51,14 +43,13 @@
 
         <label>Priority:</label>
         <select id="priority">
-            <option value="1">Low (Blue)</option>
-            <option value="2">Medium (Green)</option>
-            <option value="3">High (Red Alarm)</option>
+            <option value="1">Low (Blue - 3s)</option>
+            <option value="2">Medium (Green - 5s)</option>
+            <option value="3">High (Red - Block)</option>
         </select>
 
         <button class="btn" onclick="sendMessage()">Send Message</button>
         
-        <!-- Special SOS Acknowledge Button -->
         <button id="ackBtn" class="btn" onclick="acknowledgeSOS()">STOP ALARM & REPLY</button>
         
         <div id="status"></div>
@@ -77,6 +68,8 @@
         const readApiKey = "P8TAL1X6R6I6QTDA";
         // ----------------------------------
 
+        let manualStop = false; // Logic flag to prevent re-triggering
+
         function sendMessage() {
             const msg = document.getElementById('lcdMessage').value;
             const prio = document.getElementById('priority').value;
@@ -86,10 +79,8 @@
             if (!msg) { statusEl.innerText = "Enter a message!"; return; }
             statusEl.innerText = "Sending...";
             
-            // RESET Device Status so user knows when the NEW Ack comes
-            document.getElementById('deviceStatus').innerText = "Waiting for device...";
-            document.getElementById('deviceStatus').style.color = "gray";
-
+            document.getElementById('deviceStatus').innerText = "Sending...";
+            
             const url = `https://api.thingspeak.com/update?api_key=${writeApiKey}&field1=${encodeURIComponent(msg)}&field2=${prio}&field3=${id}&field4=Sent`;
 
             fetch(url, { method: 'POST' }).then(r => r.text()).then(d => {
@@ -98,17 +89,21 @@
         }
 
         function acknowledgeSOS() {
-            // 1. Send message to LCD saying "HELP IS COMING"
-            // 2. Reset SOS status
+            manualStop = true; // Prevent browser from re-triggering SOS
+            stopSOS();
+            document.getElementById('status').innerText = "Replying...";
+            
+            // Send SOS_ACK to device
             const id = Math.floor(Math.random() * 10000) + 1;
             const url = `https://api.thingspeak.com/update?api_key=${writeApiKey}&field1=HELP%20IS%20COMING&field2=3&field3=${id}&field4=SOS_ACK`;
             
-            fetch(url, { method: 'POST' });
-            stopSOS();
-            document.getElementById('status').innerText = "Reply Sent to LCD";
+            fetch(url, { method: 'POST' }).then(() => {
+                 document.getElementById('status').innerText = "Reply Sent!";
+                 document.getElementById('deviceStatus').innerText = "Responded to SOS";
+                 document.getElementById('deviceStatus').style.color = "green";
+            });
         }
 
-        // Poll for ACK or SOS every 5 seconds
         setInterval(() => {
             fetch(`https://api.thingspeak.com/channels/${channelID}/fields/4/last.txt?api_key=${readApiKey}`)
                 .then(r => r.text())
@@ -120,36 +115,48 @@
                         disp.innerText = "✅ Message Acknowledged!";
                         disp.style.color = "green";
                         stopSOS();
-                    } else if (cleanStatus === "SOS") {
-                        disp.innerText = "🚨 SOS RECEIVED! 🚨";
-                        disp.style.color = "red";
-                        triggerSOS();
-                    } else if (cleanStatus === "SOS_ACK") {
-                         disp.innerText = "Responded to SOS";
-                         stopSOS();
-                    } else {
-                        // Keep showing whatever status (like "Sent")
-                        if(disp.innerText === "Waiting for device...") {
-                            // Don't overwrite if we are waiting
-                        } else if (cleanStatus === "Sent") {
-                            // Do nothing
+                        manualStop = false; // Reset flag
+                    } 
+                    else if (cleanStatus === "SOS") {
+                        // Only trigger if we haven't manually stopped it recently
+                        if (!manualStop) {
+                            disp.innerText = "🚨 SOS RECEIVED! 🚨";
+                            disp.style.color = "red";
+                            triggerSOS();
                         } else {
-                            disp.innerText = cleanStatus;
+                            disp.innerText = "SOS (Silenced)";
+                            disp.style.color = "orange";
                         }
+                    } 
+                    else if (cleanStatus === "SOS_ACK") {
+                         disp.innerText = "Device: SOS Reply Received";
+                         disp.style.color = "blue";
+                         stopSOS();
+                         manualStop = false; // Reset flag logic
+                    } 
+                    else {
+                        if(cleanStatus !== "Sent") {
+                             disp.innerText = cleanStatus;
+                             disp.style.color = "black";
+                        }
+                        // If status is anything other than SOS, we can clear the manual stop
+                        manualStop = false;
+                        stopSOS();
                     }
                 });
-        }, 5000);
+        }, 6000); // Increased to 6s to be safer with rate limits
 
         function triggerSOS() {
+            if(document.body.classList.contains('sos-mode')) return; // Already active
             document.body.classList.add('sos-mode');
             document.getElementById('mainBox').classList.add('sos-container');
-            document.getElementById('ackBtn').style.display = "block"; // Show button
-            document.getElementById('alarmSound').play().catch(e => console.log("Audio requires interaction"));
+            document.getElementById('ackBtn').style.display = "block";
+            document.getElementById('alarmSound').play().catch(e => console.log("Audio blocked"));
         }
         function stopSOS() {
             document.body.classList.remove('sos-mode');
             document.getElementById('mainBox').classList.remove('sos-container');
-            document.getElementById('ackBtn').style.display = "none"; // Hide button
+            document.getElementById('ackBtn').style.display = "none";
             document.getElementById('alarmSound').pause();
             document.getElementById('alarmSound').currentTime = 0;
         }

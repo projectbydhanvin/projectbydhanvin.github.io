@@ -3,77 +3,107 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>IoT Alert System</title>
+    <title>IoT Control Center</title>
     <style>
-        body { font-family: sans-serif; background-color: #f4f4f4; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; }
-        .container { background-color: white; padding: 2rem; border-radius: 8px; box-shadow: 0 4px 8px rgba(0,0,0,0.1); text-align: center; width: 300px; }
+        body { font-family: sans-serif; background-color: #f4f4f4; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; margin: 0; transition: background-color 0.5s; }
+        .container { background-color: white; padding: 2rem; border-radius: 8px; box-shadow: 0 4px 8px rgba(0,0,0,0.1); text-align: center; width: 320px; }
         input[type="text"], select { width: 90%; padding: 10px; margin-bottom: 1rem; border: 1px solid #ccc; border-radius: 4px; font-size: 16px; }
-        button { background-color: #007bff; color: white; padding: 10px 20px; border: none; border-radius: 4px; cursor: pointer; font-size: 1rem; width: 100%; }
+        button { background-color: #007bff; color: white; padding: 12px; border: none; border-radius: 4px; cursor: pointer; font-size: 1rem; width: 100%; margin-bottom: 10px; }
         button:hover { background-color: #0056b3; }
-        #status { margin-top: 1rem; font-weight: bold; }
-        label { display: block; text-align: left; margin-bottom: 5px; font-weight: bold; color: #333; }
+        #status, #deviceStatus { margin-top: 1rem; font-weight: bold; min-height: 20px; }
+        
+        /* SOS Animation Classes */
+        .sos-mode { animation: redFlash 1s infinite; }
+        @keyframes redFlash {
+            0% { background-color: #ff0000; }
+            50% { background-color: #550000; }
+            100% { background-color: #ff0000; }
+        }
+        .sos-text { color: white !important; font-size: 2rem; font-weight: bold; }
     </style>
 </head>
 <body>
-    <div class="container">
-        <h1>Send Alert</h1>
+    <div class="container" id="mainBox">
+        <h1>IoT Command</h1>
         
-        <label for="lcdMessage">Message:</label>
+        <label>Message:</label>
         <input type="text" id="lcdMessage" placeholder="Enter message...">
 
-        <label for="priority">Priority Level:</label>
+        <label>Priority:</label>
         <select id="priority">
-            <option value="1">Low (Blue Light)</option>
-            <option value="2">Medium (Green Light)</option>
+            <option value="1">Low (Blue)</option>
+            <option value="2">Medium (Green)</option>
             <option value="3">High (Red Alarm)</option>
         </select>
 
-        <button onclick="updateText()">Send Alert</button>
-        <p id="status"></p>
+        <button onclick="sendMessage()">Send Message</button>
+        
+        <div id="status"></div>
+        <hr>
+        <div>Device says: <span id="deviceStatus">Waiting...</span></div>
     </div>
 
+    <!-- SOS Audio -->
+    <audio id="alarmSound" loop>
+        <source src="https://actions.google.com/sounds/v1/alarms/alarm_clock.ogg" type="audio/ogg">
+    </audio>
+
     <script>
-        // --- ACTION REQUIRED: REPLACE WITH YOUR WRITE API KEY ---
+        // --- ACTION REQUIRED: FILL KEYS ---
         const writeApiKey = "Z39BBNNMNBUYY8SP"; 
-        // ------------------------------------------------------
+        const channelID = "3172147"; 
+        const readApiKey = "P8TAL1X6R6I6QTDA";
+        // ----------------------------------
 
-        function updateText() {
-            const message = document.getElementById('lcdMessage').value;
-            const priority = document.getElementById('priority').value;
-            const statusElement = document.getElementById('status');
-            
-            // Generate a random ID (1 to 10000) to make every request unique
-            const uniqueID = Math.floor(Math.random() * 10000) + 1;
+        function sendMessage() {
+            const msg = document.getElementById('lcdMessage').value;
+            const prio = document.getElementById('priority').value;
+            const id = Math.floor(Math.random() * 10000) + 1;
+            const statusEl = document.getElementById('status');
 
-            if (!message) {
-                statusElement.textContent = "Error: Please enter a message.";
-                statusElement.style.color = "red";
-                return;
-            }
+            if (!msg) { statusEl.innerText = "Enter a message!"; return; }
+            statusEl.innerText = "Sending...";
 
-            statusElement.textContent = "Sending...";
-            statusElement.style.color = "orange";
+            // Send Msg, Prio, ID. Also reset Field 4 (Status) to "Sent"
+            const url = `https://api.thingspeak.com/update?api_key=${writeApiKey}&field1=${encodeURIComponent(msg)}&field2=${prio}&field3=${id}&field4=Sent`;
 
-            // Send Message (Field 1), Priority (Field 2), AND Unique ID (Field 3)
-            const url = `https://api.thingspeak.com/update?api_key=${writeApiKey}&field1=${encodeURIComponent(message)}&field2=${priority}&field3=${uniqueID}`;
+            fetch(url, { method: 'POST' }).then(r => r.text()).then(d => {
+                statusEl.innerText = (d !== "0") ? "Sent Successfully!" : "Error.";
+            });
+        }
 
-            fetch(url, { method: 'POST' })
-                .then(response => response.text())
-                .then(data => {
-                    if (data !== "0") {
-                        statusElement.textContent = "Sent Successfully!";
-                        statusElement.style.color = "green";
+        // Poll for ACK or SOS every 5 seconds
+        setInterval(() => {
+            fetch(`https://api.thingspeak.com/channels/${channelID}/fields/4/last.txt?api_key=${readApiKey}`)
+                .then(r => r.text())
+                .then(status => {
+                    const disp = document.getElementById('deviceStatus');
+                    
+                    if (status.trim() === "ACK") {
+                        disp.innerText = "✅ Message Acknowledged!";
+                        disp.style.color = "green";
+                        stopSOS();
+                    } else if (status.trim() === "SOS") {
+                        disp.innerText = "🚨 HELP! SOS RECEIVED! 🚨";
+                        triggerSOS();
                     } else {
-                        statusElement.textContent = "Error: ThingSpeak rejected.";
-                        statusElement.style.color = "red";
+                        disp.innerText = status;
+                        disp.style.color = "black";
+                        stopSOS();
                     }
-                })
-                .catch(error => {
-                    statusElement.textContent = "Network Error.";
-                    statusElement.style.color = "red";
                 });
+        }, 5000);
+
+        function triggerSOS() {
+            document.body.classList.add('sos-mode');
+            document.getElementById('mainBox').classList.add('sos-text');
+            document.getElementById('alarmSound').play().catch(e => console.log("Click page to allow audio"));
+        }
+        function stopSOS() {
+            document.body.classList.remove('sos-mode');
+            document.getElementById('mainBox').classList.remove('sos-text');
+            document.getElementById('alarmSound').pause();
         }
     </script>
 </body>
 </html>
-

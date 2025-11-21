@@ -30,31 +30,12 @@
         .sos-mode { animation: redFlash 1s infinite; }
         .sos-container { animation: shake 0.5s infinite; border: 5px solid red; }
 
-        /* STARTUP OVERLAY */
-        #startOverlay {
-            position: fixed; top: 0; left: 0; width: 100%; height: 100%;
-            background: rgba(0,0,0,0.8);
-            color: white;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-size: 2rem;
-            font-weight: bold;
-            z-index: 9999;
-            cursor: pointer;
-        }
-
         @keyframes redFlash { 0% { background-color: #ff0000; } 50% { background-color: #330000; } 100% { background-color: #ff0000; } }
         @keyframes pulse { 0% { transform: scale(1); } 50% { transform: scale(1.05); } 100% { transform: scale(1); } }
         @keyframes shake { 0% { transform: translate(1px, 1px); } 25% { transform: translate(-1px, -2px); } 50% { transform: translate(-3px, 0px); } 75% { transform: translate(3px, 2px); } 100% { transform: translate(1px, -1px); } }
     </style>
 </head>
 <body>
-
-    <!-- CLICK THIS TO ENABLE SOUND -->
-    <div id="startOverlay" onclick="enableAudio()">
-        CLICK TO CONNECT
-    </div>
 
     <div class="container" id="mainBox">
         <h1>IoT Command</h1>
@@ -69,6 +50,7 @@
             <option value="3">High (Red - Block)</option>
             <option value="4">Temporary (10s - No Log)</option>
         </select>
+
         <button class="btn" onclick="sendMessage()">Send Message</button>
         
         <button id="ackBtn" class="btn" onclick="acknowledgeSOS()">STOP ALARM & REPLY</button>
@@ -81,7 +63,6 @@
     <!-- Reliable Alarm Sound Source -->
     <audio id="alarmSound" loop>
         <source src="https://www.soundjay.com/buttons/sounds/button-10.mp3" type="audio/mpeg">
-        <!-- Backup Sound just in case -->
         <source src="https://actions.google.com/sounds/v1/alarms/alarm_clock.ogg" type="audio/ogg">
     </audio>
 
@@ -93,19 +74,6 @@
         // ------------
 
         let manualStop = false; 
-        let audioEnabled = false;
-
-        function enableAudio() {
-            const audio = document.getElementById('alarmSound');
-            // Play and pause instantly to unlock the browser audio engine
-            audio.volume = 0; 
-            audio.play().then(() => {
-                audio.pause();
-                audio.volume = 1.0; // Reset volume for real alarm
-                audioEnabled = true;
-                document.getElementById('startOverlay').style.display = 'none'; // Hide overlay
-            }).catch(e => console.log("Audio Error: " + e));
-        }
 
         function sendMessage() {
             const msg = document.getElementById('lcdMessage').value;
@@ -187,9 +155,9 @@
             document.getElementById('mainBox').classList.add('sos-container');
             document.getElementById('ackBtn').style.display = "block";
             
-            if(audioEnabled) {
-                document.getElementById('alarmSound').play().catch(e => console.log("Audio still blocked"));
-            }
+            // Try to play sound. If user hasn't interacted with page yet, browser might block it.
+            // But the Visual Red Flash will ALWAYS work.
+            document.getElementById('alarmSound').play().catch(e => console.log("Audio autoplay blocked by browser policy"));
         }
         function stopSOS() {
             document.body.classList.remove('sos-mode');
@@ -201,4 +169,3 @@
     </script>
 </body>
 </html>
-

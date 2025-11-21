@@ -14,7 +14,6 @@
             box-shadow: 0 4px 8px rgba(0,0,0,0.1); 
             text-align: center; 
             width: 320px; 
-            /* Default color, but allows overrides */
             color: #000; 
         }
 
@@ -27,8 +26,23 @@
         
         #status, #deviceStatus { margin-top: 1rem; font-weight: bold; min-height: 20px; }
         
+        /* SOS Animation Logic */
         .sos-mode { animation: redFlash 1s infinite; }
         .sos-container { animation: shake 0.5s infinite; border: 5px solid red; }
+
+        /* STARTUP OVERLAY */
+        #startOverlay {
+            position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(0,0,0,0.8);
+            color: white;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 2rem;
+            font-weight: bold;
+            z-index: 9999;
+            cursor: pointer;
+        }
 
         @keyframes redFlash { 0% { background-color: #ff0000; } 50% { background-color: #330000; } 100% { background-color: #ff0000; } }
         @keyframes pulse { 0% { transform: scale(1); } 50% { transform: scale(1.05); } 100% { transform: scale(1); } }
@@ -36,6 +50,12 @@
     </style>
 </head>
 <body>
+
+    <!-- CLICK THIS TO ENABLE SOUND -->
+    <div id="startOverlay" onclick="enableAudio()">
+        CLICK TO CONNECT
+    </div>
+
     <div class="container" id="mainBox">
         <h1>IoT Command</h1>
         
@@ -58,7 +78,10 @@
         <div>Device Status: <span id="deviceStatus">Waiting...</span></div>
     </div>
 
+    <!-- Reliable Alarm Sound Source -->
     <audio id="alarmSound" loop>
+        <source src="https://www.soundjay.com/buttons/sounds/button-10.mp3" type="audio/mpeg">
+        <!-- Backup Sound just in case -->
         <source src="https://actions.google.com/sounds/v1/alarms/alarm_clock.ogg" type="audio/ogg">
     </audio>
 
@@ -70,6 +93,19 @@
         // ------------
 
         let manualStop = false; 
+        let audioEnabled = false;
+
+        function enableAudio() {
+            const audio = document.getElementById('alarmSound');
+            // Play and pause instantly to unlock the browser audio engine
+            audio.volume = 0; 
+            audio.play().then(() => {
+                audio.pause();
+                audio.volume = 1.0; // Reset volume for real alarm
+                audioEnabled = true;
+                document.getElementById('startOverlay').style.display = 'none'; // Hide overlay
+            }).catch(e => console.log("Audio Error: " + e));
+        }
 
         function sendMessage() {
             const msg = document.getElementById('lcdMessage').value;
@@ -95,7 +131,6 @@
             stopSOS();
             document.getElementById('status').innerText = "Replying...";
             
-            // Send SOS_ACK to device
             const id = Math.floor(Math.random() * 10000) + 1;
             const url = `https://api.thingspeak.com/update?api_key=${writeApiKey}&field1=HELP%20IS%20COMING&field2=3&field3=${id}&field4=SOS_ACK`;
             
@@ -151,7 +186,10 @@
             document.body.classList.add('sos-mode');
             document.getElementById('mainBox').classList.add('sos-container');
             document.getElementById('ackBtn').style.display = "block";
-            document.getElementById('alarmSound').play().catch(e => console.log("Audio blocked"));
+            
+            if(audioEnabled) {
+                document.getElementById('alarmSound').play().catch(e => console.log("Audio still blocked"));
+            }
         }
         function stopSOS() {
             document.body.classList.remove('sos-mode');
